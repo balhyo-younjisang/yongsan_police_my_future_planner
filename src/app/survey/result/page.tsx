@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+
 
 type RiskAssessment = {
     level: '낮음' | '중간' | '높음';
@@ -310,11 +313,16 @@ const AdviceCard = ({ advice }: { advice: PreventionAdvice }) => (
     </motion.div>
 );
 
-export default function ResultPage() {
+// ResultContent 컴포넌트를 별도로 분리
+function ResultContent() {
     const searchParams = useSearchParams();
     const [result, setResult] = useState<SurveyResult | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+    const [isLoaded, setIsLoaded] = useState(false);
+    const [isDownloading, setIsDownloading] = useState(false);
+    const [advice, setAdvice] = useState<PreventionAdvice | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
@@ -340,6 +348,229 @@ export default function ResultPage() {
         }
         setIsLoading(false);
     }, [searchParams]);
+
+    const handleDownload = async () => {
+        if (isDownloading) return;
+        
+        try {
+            setIsDownloading(true);
+            const content = document.getElementById('result-content');
+            if (!content) {
+                throw new Error('결과 내용을 찾을 수 없습니다.');
+            }
+
+            // 로딩 상태 표시
+            const loadingToast = document.createElement('div');
+            loadingToast.className = 'fixed top-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2';
+            loadingToast.innerHTML = `
+                <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>PDF를 생성하는 중...</span>
+            `;
+            document.body.appendChild(loadingToast);
+
+            // 컨텐츠 복제 및 스타일 조정
+            const clonedContent = content.cloneNode(true) as HTMLElement;
+            
+            // PDF용 스타일 적용
+            const style = document.createElement('style');
+            style.textContent = `
+                .pdf-content {
+                    width: 100% !important;
+                    max-width: none !important;
+                    background: white !important;
+                    padding: 2rem !important;
+                    margin: 0 !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                    position: static !important;
+                    transform: none !important;
+                    opacity: 1 !important;
+                    height: auto !important;
+                    min-height: auto !important;
+                    overflow: visible !important;
+                }
+                .pdf-content * {
+                    color: black !important;
+                    background: transparent !important;
+                    box-shadow: none !important;
+                    text-shadow: none !important;
+                    border-color: #e5e7eb !important;
+                    height: auto !important;
+                    min-height: auto !important;
+                    max-height: none !important;
+                    overflow: visible !important;
+                }
+                .pdf-content .bg-gradient-to-r,
+                .pdf-content .bg-gradient-to-br,
+                .pdf-content .bg-gradient-to-tr {
+                    background: white !important;
+                }
+                .pdf-content .text-transparent {
+                    color: black !important;
+                }
+                .pdf-content .backdrop-blur-md {
+                    backdrop-filter: none !important;
+                }
+                .pdf-content .animate-float,
+                .pdf-content .animate-float-delayed,
+                .pdf-content .animate-pulse,
+                .pdf-content .animate-pulse-delayed {
+                    animation: none !important;
+                }
+                .pdf-content .fixed {
+                    position: static !important;
+                }
+                .pdf-content .bg-white\/95 {
+                    background: white !important;
+                }
+                .pdf-content .bg-blue-50\/80,
+                .pdf-content .bg-indigo-50\/80 {
+                    background: #f8fafc !important;
+                }
+                .pdf-content .from-blue-400,
+                .pdf-content .via-indigo-400,
+                .pdf-content .to-violet-400 {
+                    background: #3b82f6 !important;
+                }
+                .pdf-content .text-blue-600 {
+                    color: #2563eb !important;
+                }
+                .pdf-content .text-indigo-600 {
+                    color: #4f46e5 !important;
+                }
+                .pdf-content .text-violet-600 {
+                    color: #7c3aed !important;
+                }
+                .pdf-content .text-white {
+                    color: black !important;
+                }
+                .pdf-content .bg-gradient-to-r.from-blue-400.via-indigo-400.to-violet-400 {
+                    background: #3b82f6 !important;
+                }
+                .pdf-content .bg-gradient-to-r.from-blue-400.via-indigo-400.to-violet-400 * {
+                    color: black !important;
+                }
+                .pdf-content .min-h-screen {
+                    min-height: auto !important;
+                }
+                .pdf-content .space-y-8 > * {
+                    margin-bottom: 2rem !important;
+                }
+                .pdf-content .space-y-6 > * {
+                    margin-bottom: 1.5rem !important;
+                }
+                .pdf-content .space-y-4 > * {
+                    margin-bottom: 1rem !important;
+                }
+                .pdf-content .space-y-2 > * {
+                    margin-bottom: 0.5rem !important;
+                }
+            `;
+            clonedContent.classList.add('pdf-content');
+            document.head.appendChild(style);
+            document.body.appendChild(clonedContent);
+
+            // 캔버스 생성
+            const canvas = await html2canvas(clonedContent, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                removeContainer: true,
+                allowTaint: true,
+                foreignObjectRendering: false,
+                imageTimeout: 0,
+                height: clonedContent.scrollHeight,
+                windowHeight: clonedContent.scrollHeight,
+                onclone: (clonedDoc) => {
+                    // 애니메이션 요소 제거
+                    const elementsToRemove = clonedDoc.querySelectorAll('.animate-float, .animate-float-delayed, .animate-pulse, .animate-pulse-delayed, .animate-float-slow, .animate-float-slow-delayed');
+                    elementsToRemove.forEach(el => el.remove());
+                    
+                    // 배경 요소 제거
+                    const backgroundElements = clonedDoc.querySelectorAll('.fixed');
+                    backgroundElements.forEach(el => el.remove());
+
+                    // 모든 요소의 높이를 자동으로 설정
+                    const allElements = clonedDoc.querySelectorAll('*');
+                    allElements.forEach(el => {
+                        if (el instanceof HTMLElement) {
+                            el.style.height = 'auto';
+                            el.style.minHeight = 'auto';
+                            el.style.maxHeight = 'none';
+                            el.style.overflow = 'visible';
+                        }
+                    });
+                }
+            });
+
+            // 복제된 컨텐츠와 스타일 제거
+            document.body.removeChild(clonedContent);
+            document.head.removeChild(style);
+            document.body.removeChild(loadingToast);
+
+            // PDF 생성
+            const imgData = canvas.toDataURL('image/jpeg', 1.0);
+            const pdfWidth = 210; // A4 width in mm
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            const pdf = new jsPDF({
+                orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
+                unit: 'mm',
+                format: 'a4',
+                compress: true
+            });
+
+            // 페이지 분할 처리
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            let heightLeft = pdfHeight;
+            let position = 0;
+
+            while (heightLeft > 0) {
+                pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST');
+                heightLeft -= pageHeight;
+                
+                if (heightLeft > 0) {
+                    pdf.addPage();
+                    position -= pageHeight;
+                }
+            }
+
+            pdf.save(`마약중독위험도_검사결과_${new Date().toLocaleDateString()}.pdf`);
+
+            // 성공 토스트 메시지
+            const successToast = document.createElement('div');
+            successToast.className = 'fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2';
+            successToast.innerHTML = `
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span>PDF가 성공적으로 저장되었습니다!</span>
+            `;
+            document.body.appendChild(successToast);
+            setTimeout(() => document.body.removeChild(successToast), 3000);
+
+        } catch (error) {
+            console.error('PDF 생성 중 오류가 발생했습니다:', error);
+            
+            // 에러 토스트 메시지
+            const errorToast = document.createElement('div');
+            errorToast.className = 'fixed top-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2';
+            errorToast.innerHTML = `
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span>PDF 생성 중 오류가 발생했습니다. 다시 시도해주세요.</span>
+            `;
+            document.body.appendChild(errorToast);
+            setTimeout(() => document.body.removeChild(errorToast), 3000);
+        } finally {
+            setIsDownloading(false);
+        }
+    };
 
     if (isLoading) {
         return (
@@ -431,7 +662,7 @@ export default function ResultPage() {
     };
 
     return (
-        <main className="min-h-screen bg-gradient-to-b from-white via-blue-50/80 to-indigo-50/80 py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+        <main className="min-h-screen bg-gradient-to-b from-white via-blue-50/80 to-indigo-50/80 text-foreground relative overflow-hidden px-4 sm:px-6 md:px-8 lg:px-10 py-12 sm:py-16 md:py-20">
             {/* Background container */}
             <div className="fixed inset-0 w-full h-full pointer-events-none">
                 {/* Large floating patterns */}
@@ -449,7 +680,7 @@ export default function ResultPage() {
                 <div className="absolute bottom-1/3 right-1/4 w-[600px] h-[600px] bg-gradient-to-l from-indigo-200 to-violet-200 rounded-full mix-blend-normal filter blur-[80px] opacity-30 animate-float-delayed" />
             </div>
 
-            <div className="relative z-10 max-w-5xl mx-auto space-y-8">
+            <div id="result-content" className="relative z-10 max-w-5xl mx-auto space-y-8">
                 {/* 헤더 */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -597,7 +828,47 @@ export default function ResultPage() {
                         <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     </button>
                 </motion.div>
+
+                {/* Download Button */}
+                <div className="mt-6 sm:mt-8 flex justify-center">
+                    <button
+                        onClick={handleDownload}
+                        disabled={isDownloading}
+                        className="group relative flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
+                    >
+                        <div className="absolute inset-0 bg-gradient-to-r from-blue-700 to-indigo-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        <div className="relative flex items-center gap-2">
+                            <svg className="w-5 h-5 transform group-hover:scale-110 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            <span className="font-medium">
+                                {isDownloading ? (
+                                    <span className="flex items-center gap-2">
+                                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        PDF 생성 중...
+                                    </span>
+                                ) : 'PDF로 저장'}
+                            </span>
+                        </div>
+                    </button>
+                </div>
             </div>
         </main>
+    );
+}
+
+// 메인 페이지 컴포넌트
+export default function ResultPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-gradient-to-b from-white via-purple-50/80 to-indigo-50/80 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-500 border-t-transparent"></div>
+            </div>
+        }>
+            <ResultContent />
+        </Suspense>
     );
 }
