@@ -1,16 +1,69 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, ReactElement } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useForm, Controller, ControllerRenderProps, FieldError, UseFormReturn, FieldValues } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+
+// Zod 스키마 정의
+const surveySchema = z.object({
+    '1': z.enum(['male', 'female', 'none'], {
+        required_error: '성별을 선택해주세요.',
+    }),
+    '2': z.object({
+        age: z.number({
+            required_error: '나이를 입력해주세요.',
+            invalid_type_error: '올바른 숫자를 입력해주세요.',
+        }).min(1, '나이를 입력해주세요.').max(100, '올바른 나이를 입력해주세요.'),
+        grade: z.string({
+            required_error: '학년을 선택해주세요.',
+        }).min(1, '학년을 선택해주세요.'),
+    }),
+    '3': z.object({
+        value: z.string({
+            required_error: '장래희망을 선택해주세요.',
+        }).min(1, '장래희망을 선택해주세요.'),
+        other: z.string().optional(),
+    }),
+    '4': z.array(z.string(), {
+        required_error: '취미를 선택해주세요.',
+    }).min(1, '최소 하나 이상의 취미를 선택해주세요.'),
+    '5': z.enum(['less1', '1to3', '3to5', 'more5'], {
+        required_error: '스마트폰 사용 시간을 선택해주세요.',
+    }),
+    '6': z.array(z.string(), {
+        required_error: '감정을 선택해주세요.',
+    }).min(1, '최소 하나 이상의 감정을 선택해주세요.'),
+    '7': z.enum(['none', 'talk', 'game', 'alone', 'exercise', 'sns', 'cry'], {
+        required_error: '스트레스 해소 방법을 선택해주세요.',
+    }),
+    '8': z.enum(['very_bad', 'curious', 'okay', 'dont_know'], {
+        required_error: '마약에 대한 의견을 선택해주세요.',
+    }),
+    '9': z.enum(['dont_know', 'refuse', 'accept', 'consider'], {
+        required_error: '마약 권유 시 대응 방법을 선택해주세요.',
+    }),
+    '10': z.string({
+        required_error: '미래에 대한 생각을 입력해주세요.',
+    }).min(1, '미래에 대한 생각을 입력해주세요.').refine(
+        (val) => !['dont_know', 'refuse', 'accept', 'consider'].includes(val),
+        '올바른 텍스트를 입력해주세요.'
+    ),
+    '4.0': z.string().optional(),
+});
+
+type SurveyFormValues = z.infer<typeof surveySchema>;
 
 type Question = {
     id: number;
+    type: 'text' | 'number' | 'single' | 'multiple';
     text: string;
-    type: 'single' | 'multiple' | 'text' | 'number';
-    options?: {
+    options?: Array<{
         value: string;
         text: string;
         isOther?: boolean;
-    }[];
+    }>;
     placeholder?: string;
     required?: boolean;
 };
@@ -124,107 +177,196 @@ const questions: Question[] = [
     },
     {
         id: 9,
-        text: "마약을 권유받는다면 어떻게 할 것 같나요?",
         type: 'single',
+        text: '친구가 마약을 권유한다면 어떻게 하시겠습니까?',
         options: [
-            { value: "refuse", text: "단호히 거절한다" },
-            { value: "consider", text: "고민할 것 같다" },
-            { value: "try", text: "한 번쯤 해볼지도 모르겠다" },
-            { value: "dont_know", text: "모르겠다" }
-        ],
-        required: true
+            { value: 'dont_know', text: '모르겠다' },
+            { value: 'refuse', text: '거절한다' },
+            { value: 'accept', text: '수락한다' },
+            { value: 'consider', text: '고민한다' }
+        ]
     },
     {
         id: 10,
-        text: "미래의 나에 대해 어떤 기대를 가지고 있나요?",
         type: 'text',
-        placeholder: "예시: 나는 선생님이 되고 싶고, 아이들을 가르치며 행복하게 살고 싶다.",
-        required: true
+        text: '미래에 대한 나의 생각은?',
+        placeholder: '미래에 대한 생각을 자유롭게 작성해주세요.'
     }
 ];
 
-type ValidationError = {
-    message: string;
-    type: 'required' | 'invalid' | 'length' | 'range';
+type SurveyState = 'welcome' | 'survey' | 'result';
+
+type ErrorState = {
+    [key: string]: { message: string } | undefined;
 };
 
-const validateAnswer = (question: Question, answer: any, otherInput?: string): ValidationError | null => {
-    // 필수 입력 검사
-    if (question.required && (
-        answer === undefined || 
-        answer === null || 
-        answer === '' || 
-        (Array.isArray(answer) && answer.length === 0)
-    )) {
-        return {
-            message: '이 문항은 필수로 답변해주세요.',
-            type: 'required'
-        };
+// 에러 메시지 매핑 객체 추가
+const errorMessages: Record<string, Record<string, string>> = {
+    '5': {
+        'less1': '1시간 미만',
+        '1to3': '1~3시간',
+        '3to5': '3~5시간',
+        'more5': '5시간 이상',
+    },
+    '7': {
+        'none': '없음',
+        'talk': '대화하기',
+        'game': '게임하기',
+        'alone': '혼자 있기',
+        'exercise': '운동하기',
+        'sns': 'SNS하기',
+        'cry': '울기',
+    },
+    '8': {
+        'very_bad': '매우 나쁨',
+        'curious': '호기심',
+        'okay': '괜찮음',
+        'dont_know': '모르겠음',
+    },
+    '9': {
+        'dont_know': '모르겠음',
+        'refuse': '거절',
+        'accept': '수락',
+        'consider': '고민',
     }
-
-    // 문항 타입별 유효성 검사
-    switch (question.type) {
-        case 'number':
-            const num = Number(answer);
-            if (isNaN(num)) {
-                return {
-                    message: '올바른 숫자를 입력해주세요.',
-                    type: 'invalid'
-                };
-            }
-            if (num < 10 || num > 20) {
-                return {
-                    message: '10세에서 20세 사이의 나이를 입력해주세요.',
-                    type: 'range'
-                };
-            }
-            break;
-
-        case 'text':
-            if (answer.length < 10) {
-                return {
-                    message: '10자 이상 입력해주세요.',
-                    type: 'length'
-                };
-            }
-            if (answer.length > 500) {
-                return {
-                    message: '500자 이내로 입력해주세요.',
-                    type: 'length'
-                };
-            }
-            break;
-
-        case 'multiple':
-            if (answer.length > 5) {
-                return {
-                    message: '최대 5개까지만 선택 가능합니다.',
-                    type: 'range'
-                };
-            }
-            break;
-
-        case 'single':
-            if (answer === 'other' && (!otherInput || otherInput.trim().length === 0)) {
-                return {
-                    message: '기타 항목을 선택하셨다면 내용을 입력해주세요.',
-                    type: 'required'
-                };
-            }
-            break;
-    }
-
-    return null;
 };
+
+// 사용자 친화적인 에러 메시지로 변환하는 함수
+const getFriendlyErrorMessage = (questionId: string, error: any): string => {
+    // 기본 에러 메시지
+    const defaultMessages: Record<string, string> = {
+        '1': '성별을 선택해주세요.',
+        '2': '나이와 학년을 입력해주세요.',
+        '3': '장래희망을 선택해주세요.',
+        '4': '취미를 선택해주세요.',
+        '5': '스마트폰 사용 시간을 선택해주세요.',
+        '6': '감정을 선택해주세요.',
+        '7': '스트레스 해소 방법을 선택해주세요.',
+        '8': '마약에 대한 의견을 선택해주세요.',
+        '9': '마약 권유 시 대응 방법을 선택해주세요.',
+        '10': '미래에 대한 생각을 입력해주세요.',
+    };
+
+    // 에러 메시지가 없는 경우 기본 메시지 반환
+    if (!error?.message) {
+        return defaultMessages[questionId] || '올바른 값을 입력해주세요.';
+    }
+
+    // Zod 에러 메시지 처리
+    const errorMessage = error.message;
+    
+    // 배열 타입 에러 처리
+    if (errorMessage.includes('received array')) {
+        return defaultMessages[questionId] || '하나의 항목만 선택해주세요.';
+    }
+
+    // enum 타입 에러 처리
+    if (errorMessage.includes('Expected') && errorMessage.includes('received')) {
+        const questionMessages = errorMessages[questionId];
+        if (questionMessages) {
+            return defaultMessages[questionId] || '올바른 항목을 선택해주세요.';
+        }
+    }
+
+    // 기타 에러는 기본 메시지 반환
+    return defaultMessages[questionId] || '올바른 값을 입력해주세요.';
+};
+
+// 답변 타입 정의
+type SurveyAnswer = {
+    questionId: number;
+    answer: string | string[] | { value: string; other?: string } | { age: number; grade: string };
+    timestamp: string;
+};
+
+// 각 질문별 상태 타입 정의
+type Question1State = 'male' | 'female' | 'none' | undefined;
+type Question2State = { age: number; grade: string };
+type Question3State = { value: string; other?: string };
+type Question4State = string[];
+type Question5State = 'less1' | '1to3' | '3to5' | 'more5' | undefined;
+type Question6State = string[];
+type Question7State = 'none' | 'talk' | 'game' | 'alone' | 'exercise' | 'sns' | 'cry' | undefined;
+type Question8State = 'very_bad' | 'curious' | 'okay' | 'dont_know' | undefined;
+type Question9State = 'dont_know' | 'refuse' | 'accept' | 'consider' | undefined;
+type Question10State = string;
 
 export default function SurveyPage() {
     const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
     const [currentStep, setCurrentStep] = useState(0);
-    const [answers, setAnswers] = useState<Record<string, any>>({});
     const [showResult, setShowResult] = useState(false);
-    const [otherInputs, setOtherInputs] = useState<Record<string, string>>({});
-    const [errors, setErrors] = useState<Record<number, ValidationError>>({});
-    const [showError, setShowError] = useState(false);
+    const [nickname, setNickname] = useState<string>('');
+    const [state, setState] = useState<SurveyState>('welcome');
+    const [isLoading, setIsLoading] = useState(true);
+    const [formErrors, setFormErrors] = useState<ErrorState>({});
+    const [answers, setAnswers] = useState<SurveyAnswer[]>([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // 각 질문별 상태 추가
+    const [question1Value, setQuestion1Value] = useState<Question1State>(undefined);
+    const [question2Value, setQuestion2Value] = useState<Question2State>({ age: 0, grade: '' });
+    const [question3Value, setQuestion3Value] = useState<Question3State>({ value: '', other: undefined });
+    const [question4Value, setQuestion4Value] = useState<Question4State>([]);
+    const [question5Value, setQuestion5Value] = useState<Question5State>(undefined);
+    const [question6Value, setQuestion6Value] = useState<Question6State>([]);
+    const [question7Value, setQuestion7Value] = useState<Question7State>(undefined);
+    const [question8Value, setQuestion8Value] = useState<Question8State>(undefined);
+    const [question9Value, setQuestion9Value] = useState<Question9State>(undefined);
+    const [question10Value, setQuestion10Value] = useState<Question10State>('');
+
+    // 현재 질문의 상태와 setter를 가져오는 함수
+    const getQuestionState = (questionId: number) => {
+        switch (questionId) {
+            case 1: return { value: question1Value, setValue: setQuestion1Value };
+            case 2: return { value: question2Value, setValue: setQuestion2Value };
+            case 3: return { value: question3Value, setValue: setQuestion3Value };
+            case 4: return { value: question4Value, setValue: setQuestion4Value };
+            case 5: return { value: question5Value, setValue: setQuestion5Value };
+            case 6: return { value: question6Value, setValue: setQuestion6Value };
+            case 7: return { value: question7Value, setValue: setQuestion7Value };
+            case 8: return { value: question8Value, setValue: setQuestion8Value };
+            case 9: return { value: question9Value, setValue: setQuestion9Value };
+            case 10: return { value: question10Value, setValue: setQuestion10Value };
+            default: throw new Error(`Invalid question ID: ${questionId}`);
+        }
+    };
+
+    const form = useForm<SurveyFormValues>({
+        resolver: zodResolver(surveySchema),
+        defaultValues: {
+            '1': undefined,
+            '2': { age: 0, grade: '' },
+            '3': { value: '', other: undefined },
+            '4': [],
+            '5': undefined,
+            '6': [],
+            '7': undefined,
+            '8': undefined,
+            '9': undefined,
+            '10': '',
+            '4.0': undefined
+        },
+        mode: 'onChange'
+    });
+
+    const { control, handleSubmit, trigger, getValues, formState: { errors: validationErrors } } = form;
+
+    useEffect(() => {
+        const fetchNickname = async () => {
+            try {
+                const response = await fetch('http://localhost:8000/get-nickname');
+                const data = await response.json();
+                setNickname(data.nickname);
+            } catch (error) {
+                console.error('Failed to fetch nickname:', error);
+                setNickname('친구');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchNickname();
+    }, []);
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
@@ -238,60 +380,142 @@ export default function SurveyPage() {
         return () => window.removeEventListener('mousemove', handleMouseMove);
     }, []);
 
-    const handleAnswer = (value: any) => {
-        const question = questions[currentStep];
-        const newAnswers = { ...answers };
-        
-        if (question.type === 'multiple') {
-            newAnswers[question.id] = newAnswers[question.id] || [];
-            const index = newAnswers[question.id].indexOf(value);
-            if (index === -1) {
-                newAnswers[question.id].push(value);
+    // 답변 저장 함수 수정
+    const saveAnswer = (questionId: number, value: any) => {
+        const { setValue } = getQuestionState(questionId);
+        setValue(value);
+
+        setAnswers(prev => {
+            const existingAnswerIndex = prev.findIndex(a => a.questionId === questionId);
+            const newAnswer: SurveyAnswer = {
+                questionId,
+                answer: value,
+                timestamp: new Date().toISOString()
+            };
+
+            if (existingAnswerIndex === -1) {
+                return [...prev, newAnswer];
             } else {
-                newAnswers[question.id].splice(index, 1);
+                const updatedAnswers = [...prev];
+                updatedAnswers[existingAnswerIndex] = newAnswer;
+                return updatedAnswers;
             }
-        } else {
-            newAnswers[question.id] = value;
-        }
-        
-        setAnswers(newAnswers);
-        
-        // 답변 변경 시 해당 문항의 에러 메시지 제거
-        if (errors[question.id]) {
-            setErrors(prev => {
-                const newErrors = { ...prev };
-                delete newErrors[question.id];
-                return newErrors;
+        });
+    };
+
+    // 서버 제출 함수 수정
+    const submitToServer = async () => {
+        try {
+            setIsSubmitting(true);
+            
+            // 최종 답변 데이터 구성
+            const submissionData = {
+                formData: {
+                    '1': question1Value,
+                    '2': question2Value,
+                    '3': question3Value,
+                    '4': question4Value,
+                    '5': question5Value,
+                    '6': question6Value,
+                    '7': question7Value,
+                    '8': question8Value,
+                    '9': question9Value,
+                    '10': question10Value
+                },
+                answers: answers,
+                metadata: {
+                    submittedAt: new Date().toISOString(),
+                    totalQuestions: questions.length,
+                    completedQuestions: answers.length
+                }
+            };
+
+            const response = await fetch('/api/survey', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(submissionData)
             });
+
+            if (!response.ok) {
+                throw new Error('Failed to submit survey');
+            }
+
+            const result = await response.json();
+            setNickname(result.nickname);
+            setState('result');
+            setShowResult(true);
+        } catch (error) {
+            console.error('Error submitting survey:', error);
+            alert('설문 제출 중 오류가 발생했습니다. 다시 시도해주세요.');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
-    const handleOtherInput = (questionId: number, value: string) => {
-        setOtherInputs(prev => ({
-            ...prev,
-            [questionId]: value
-        }));
+    const handleNext = async () => {
+        const question = questions[currentStep];
+        const { value: currentValue } = getQuestionState(question.id);
+        
+        // 현재 질문의 유효성 검사
+        let isValid = true;
+        let errorMessage = '';
 
-        // 기타 입력 변경 시 해당 문항의 에러 메시지 제거
-        if (errors[questionId]) {
-            setErrors(prev => {
-                const newErrors = { ...prev };
-                delete newErrors[questionId];
-                return newErrors;
-            });
+        switch (question.type) {
+            case 'single':
+                if (['1', '5', '7', '8', '9'].includes(question.id.toString())) {
+                    isValid = currentValue !== undefined;
+                    errorMessage = '답변을 선택해주세요.';
+                } else if (question.id === 3) {
+                    const value = currentValue as Question3State;
+                    isValid = value.value !== '';
+                    errorMessage = '장래희망을 선택해주세요.';
+                }
+                break;
+
+            case 'multiple':
+                const multipleValue = currentValue as string[];
+                isValid = multipleValue.length > 0;
+                errorMessage = '최소 하나 이상 선택해주세요.';
+                break;
+
+            case 'text':
+                if (question.id === 10) {
+                    const textValue = currentValue as string;
+                    isValid = textValue.trim().length > 0;
+                    errorMessage = '답변을 입력해주세요.';
+                }
+                break;
+
+            case 'number':
+                const numberValue = currentValue as Question2State;
+                isValid = numberValue.age > 0 && numberValue.grade !== '';
+                errorMessage = '나이와 학년을 모두 입력해주세요.';
+                break;
         }
-    };
 
-    const handleNext = () => {
-        if (!validateCurrentStep()) {
+        if (!isValid) {
+            setFormErrors(prev => ({
+                ...prev,
+                [question.id]: { message: errorMessage }
+            }));
             return;
         }
 
+        // 현재 답변 저장
+        saveAnswer(question.id, currentValue);
+
+        // 다음 질문으로 이동
         if (currentStep < questions.length - 1) {
-            setCurrentStep(currentStep + 1);
-            setShowError(false);
+            setCurrentStep(prev => prev + 1);
+            setFormErrors(prev => ({
+                ...prev,
+                [question.id]: undefined
+            }));
         } else {
-            setShowResult(true);
+            // 마지막 질문이면 제출
+            await submitToServer();
         }
     };
 
@@ -301,87 +525,243 @@ export default function SurveyPage() {
         }
     };
 
-    const validateCurrentStep = (): boolean => {
-        const question = questions[currentStep];
-        const currentAnswer = answers[question.id];
-        const otherInput = otherInputs[question.id];
-        
-        const error = validateAnswer(question, currentAnswer, otherInput);
-        
-        if (error) {
-            setErrors(prev => ({
-                ...prev,
-                [question.id]: error
-            }));
-            setShowError(true);
-            return false;
+    const renderWelcome = () => {
+        if (isLoading) {
+            return (
+                <div className="flex items-center justify-center min-h-[400px]">
+                    <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
+                </div>
+            );
         }
-        
-        return true;
+
+        return (
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                className="space-y-8 text-center"
+            >
+                <motion.h1
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.1, ease: "easeOut" }}
+                    className="text-3xl sm:text-4xl font-bold text-gray-800"
+                >
+                    안녕하세요, {nickname}님!
+                </motion.h1>
+                <motion.p
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.2, ease: "easeOut" }}
+                    className="text-lg text-gray-600"
+                >
+                    마약 중독 예방을 위한 설문에 참여해주셔서 감사합니다.
+                    <br />
+                    여러분의 소중한 의견이 더 나은 미래를 만드는 데 도움이 됩니다.
+                </motion.p>
+                <motion.button
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: 0.3, ease: "easeOut" }}
+                    onClick={() => setState('survey')}
+                    className="px-8 py-4 rounded-xl bg-gradient-to-r from-blue-400 via-indigo-400 to-violet-400 hover:from-blue-500 hover:via-indigo-500 hover:to-violet-500 transition-all duration-300 text-white font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                >
+                    설문 시작하기
+                </motion.button>
+            </motion.div>
+        );
     };
 
     const renderQuestion = () => {
         const question = questions[currentStep];
-        const currentAnswer = answers[question.id];
-        const error = errors[question.id];
+        const { value: currentValue, setValue: setCurrentValue } = getQuestionState(question.id);
+        const error = formErrors[question.id.toString()];
 
-        return (
-            <div className="space-y-6 animate-fade-in-up">
-                <div className="text-center">
-                    <div className="inline-block px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-sm font-medium mb-4">
-                        {currentStep + 1} / {questions.length}
-                    </div>
-                    <h2 className="text-xl sm:text-2xl font-semibold text-gray-800 mb-2">
-                        {question.text}
-                        {question.required && <span className="text-red-500 ml-1">*</span>}
-                    </h2>
-                </div>
-
-                <div className="space-y-4">
-                    {error && showError && (
-                        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm animate-shake">
-                            {error.message}
-                        </div>
-                    )}
-
-                    {question.type === 'text' && (
-                        <div className="space-y-2">
-                            <textarea
-                                value={currentAnswer || ''}
-                                onChange={(e) => handleAnswer(e.target.value)}
-                                placeholder={question.placeholder}
-                                className={`w-full p-4 rounded-xl bg-white border transition-all duration-200 min-h-[120px] resize-none ${
-                                    error && showError
-                                        ? 'border-red-300 focus:border-red-400 focus:ring-red-200'
-                                        : 'border-gray-200 focus:border-blue-400 focus:ring-blue-200'
-                                }`}
-                            />
-                            <div className="text-sm text-gray-500 text-right">
-                                {currentAnswer?.length || 0}/500자
+        const renderField = () => {
+            switch (question.type) {
+                case 'single':
+                    if (['1', '5', '7', '8', '9'].includes(question.id.toString())) {
+                        return (
+                            <div className="grid gap-3">
+                                {question.options?.map((option) => (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => {
+                                            const newValue = option.value as any;
+                                            setCurrentValue(newValue);
+                                            saveAnswer(question.id, newValue);
+                                            // 에러 메시지 초기화
+                                            setFormErrors(prev => ({
+                                                ...prev,
+                                                [question.id]: undefined
+                                            }));
+                                        }}
+                                        className={`w-full p-4 rounded-xl bg-white border transition-all duration-200 text-left group ${
+                                            currentValue === option.value
+                                                ? 'border-blue-400 bg-blue-50 text-blue-600'
+                                                : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
+                                        }`}
+                                    >
+                                        <span className="font-medium">{option.text}</span>
+                                    </button>
+                                ))}
                             </div>
-                        </div>
-                    )}
+                        );
+                    }
 
-                    {question.type === 'number' && (
+                    // 3번 문항 (장래희망) 처리
+                    const singleValue = currentValue as Question3State;
+                    return (
+                        <div className="grid gap-3">
+                            {question.options?.map((option) => (
+                                <div key={option.value} className="space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const newValue = { value: option.value, other: '' };
+                                            setCurrentValue(newValue as any);
+                                            saveAnswer(question.id, newValue);
+                                            // 에러 메시지 초기화
+                                            setFormErrors(prev => ({
+                                                ...prev,
+                                                [question.id]: undefined
+                                            }));
+                                        }}
+                                        className={`w-full p-4 rounded-xl bg-white border transition-all duration-200 text-left group ${
+                                            singleValue.value === option.value
+                                                ? 'border-blue-400 bg-blue-50 text-blue-600'
+                                                : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
+                                        }`}
+                                    >
+                                        <span className="font-medium">{option.text}</span>
+                                    </button>
+                                    {option.isOther && singleValue.value === option.value && (
+                                        <input
+                                            type="text"
+                                            value={singleValue.other ?? ''}
+                                            onChange={(e) => {
+                                                const newValue = { ...singleValue, other: e.target.value };
+                                                setCurrentValue(newValue as any);
+                                                saveAnswer(question.id, newValue);
+                                            }}
+                                            placeholder="직접 입력해주세요"
+                                            className="w-full p-3 rounded-lg bg-white border transition-all duration-200 border-gray-200 focus:border-blue-400 focus:ring-blue-200"
+                                        />
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    );
+
+                case 'text':
+                    if (question.id === 10) {
+                        return (
+                            <div className="space-y-2">
+                                <textarea
+                                    value={currentValue as string}
+                                    onChange={(e) => {
+                                        setCurrentValue(e.target.value as any);
+                                        saveAnswer(question.id, e.target.value);
+                                    }}
+                                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    rows={4}
+                                    placeholder={question.placeholder || "답변을 입력해주세요"}
+                                />
+                                <div className="text-sm text-gray-500 text-right">
+                                    {(currentValue as string).length}/500자
+                                </div>
+                            </div>
+                        );
+                    }
+                    return null;
+
+                case 'multiple':
+                    const multipleValue = currentValue as string[];
+                    return (
+                        <div className="grid gap-3">
+                            {question.options?.map((option) => (
+                                <div key={option.value} className="space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            let newValues: string[];
+                                            if (option.value === 'other') {
+                                                // 기타 선택 시 빈 문자열로 초기화
+                                                newValues = multipleValue.includes('other')
+                                                    ? multipleValue.filter(v => v !== 'other')
+                                                    : [...multipleValue, 'other'];
+                                            } else {
+                                                newValues = multipleValue.includes(option.value)
+                                                    ? multipleValue.filter(v => v !== option.value)
+                                                    : [...multipleValue, option.value];
+                                            }
+                                            setCurrentValue(newValues as any);
+                                            saveAnswer(question.id, newValues);
+                                            // 에러 메시지 초기화
+                                            setFormErrors(prev => ({
+                                                ...prev,
+                                                [question.id]: undefined
+                                            }));
+                                        }}
+                                        className={`w-full p-4 rounded-xl bg-white border transition-all duration-200 text-left group ${
+                                            multipleValue.includes(option.value)
+                                                ? 'border-blue-400 bg-blue-50 text-blue-600'
+                                                : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
+                                        }`}
+                                    >
+                                        <span className="font-medium">{option.text}</span>
+                                    </button>
+                                    {option.isOther && multipleValue.includes(option.value) && (
+                                        <input
+                                            type="text"
+                                            value=""
+                                            onChange={(e) => {
+                                                const newValues = [...multipleValue];
+                                                setCurrentValue(newValues as any);
+                                                saveAnswer(question.id, newValues);
+                                            }}
+                                            placeholder="직접 입력해주세요"
+                                            className="w-full p-3 rounded-lg bg-white border transition-all duration-200 border-gray-200 focus:border-blue-400 focus:ring-blue-200"
+                                        />
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    );
+
+                case 'number':
+                    const numberValue = currentValue as Question2State;
+                    return (
                         <div className="space-y-4">
                             <input
                                 type="number"
-                                value={currentAnswer || ''}
-                                onChange={(e) => handleAnswer(e.target.value)}
+                                value={numberValue.age || ''}
+                                onChange={(e) => {
+                                    const newValue = { ...numberValue, age: Number(e.target.value) };
+                                    setCurrentValue(newValue as any);
+                                    saveAnswer(question.id, newValue);
+                                }}
                                 placeholder={question.placeholder}
-                                className={`w-full p-4 rounded-xl bg-white border transition-all duration-200 ${
-                                    error && showError
-                                        ? 'border-red-300 focus:border-red-400 focus:ring-red-200'
-                                        : 'border-gray-200 focus:border-blue-400 focus:ring-blue-200'
-                                }`}
+                                className="w-full p-4 rounded-xl bg-white border transition-all duration-200 border-gray-200 focus:border-blue-400 focus:ring-blue-200"
                             />
                             <div className="grid grid-cols-3 gap-3">
                                 {['초등학생', '중학생', '고등학생'].map((grade) => (
                                     <button
                                         key={grade}
-                                        onClick={() => handleAnswer(grade)}
+                                        type="button"
+                                        onClick={() => {
+                                            const newValue = { ...numberValue, grade };
+                                            setCurrentValue(newValue as any);
+                                            saveAnswer(question.id, newValue);
+                                            // 에러 메시지 초기화
+                                            setFormErrors(prev => ({
+                                                ...prev,
+                                                [question.id]: undefined
+                                            }));
+                                        }}
                                         className={`p-4 rounded-xl bg-white border transition-all duration-200 ${
-                                            currentAnswer === grade
+                                            numberValue.grade === grade
                                                 ? 'border-blue-400 bg-blue-50 text-blue-600'
                                                 : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
                                         }`}
@@ -391,61 +771,66 @@ export default function SurveyPage() {
                                 ))}
                             </div>
                         </div>
-                    )}
+                    );
 
-                    {(question.type === 'single' || question.type === 'multiple') && (
-                        <div className="grid gap-3">
-                            {question.options?.map((option) => (
-                                <div key={option.value} className="space-y-2">
-                                    <button
-                                        onClick={() => handleAnswer(option.value)}
-                                        className={`w-full p-4 rounded-xl bg-white border transition-all duration-200 text-left group ${
-                                            (question.type === 'single' && currentAnswer === option.value) ||
-                                            (question.type === 'multiple' && currentAnswer?.includes(option.value))
-                                                ? 'border-blue-400 bg-blue-50 text-blue-600'
-                                                : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50'
-                                        }`}
-                                    >
-                                        <span className="font-medium">{option.text}</span>
-                                    </button>
-                                    {option.isOther && 
-                                        ((question.type === 'single' && currentAnswer === option.value) ||
-                                         (question.type === 'multiple' && currentAnswer?.includes(option.value))) && (
-                                        <input
-                                            type="text"
-                                            value={otherInputs[question.id] || ''}
-                                            onChange={(e) => handleOtherInput(question.id, e.target.value)}
-                                            placeholder="직접 입력해주세요"
-                                            className={`w-full p-3 rounded-lg bg-white border transition-all duration-200 ${
-                                                error && showError && option.value === 'other'
-                                                    ? 'border-red-300 focus:border-red-400 focus:ring-red-200'
-                                                    : 'border-gray-200 focus:border-blue-400 focus:ring-blue-200'
-                                            }`}
-                                        />
-                                    )}
-                                </div>
-                            ))}
+                default:
+                    return null;
+            }
+        };
+
+        return (
+            <div className="space-y-6 animate-fade-in-up">
+                <div className="space-y-2">
+                    <h2 className="text-2xl font-bold text-gray-900">
+                        {question.id}. {question.text}
+                    </h2>
+                    {question.text && question.text !== question.text && (
+                        <p className="text-gray-600">{question.text}</p>
+                    )}
+                </div>
+
+                <div className="space-y-4">
+                    {error && (
+                        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm animate-shake">
+                            {error.message}
                         </div>
                     )}
+
+                    {renderField()}
                 </div>
 
                 <div className="flex justify-between pt-6">
                     <button
+                        type="button"
                         onClick={handlePrev}
                         disabled={currentStep === 0}
-                        className={`px-6 py-3 rounded-xl transition-all duration-200 ${
+                        className={`px-6 py-3 rounded-xl bg-white border transition-all duration-200 ${
                             currentStep === 0
-                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                : 'bg-white border border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700'
+                                ? 'border-gray-200 text-gray-400 cursor-not-allowed'
+                                : 'border-gray-200 text-gray-600 hover:border-blue-400 hover:text-blue-600'
                         }`}
                     >
                         이전
                     </button>
                     <button
+                        type="button"
                         onClick={handleNext}
-                        className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-400 via-indigo-400 to-violet-400 hover:from-blue-500 hover:via-indigo-500 hover:to-violet-500 transition-all duration-300 text-white font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                        disabled={isSubmitting}
+                        className={`px-6 py-3 rounded-xl bg-blue-500 text-white font-medium transition-all duration-200 hover:bg-blue-600 ${
+                            isSubmitting ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
                     >
-                        {currentStep === questions.length - 1 ? '제출하기' : '다음'}
+                        {isSubmitting ? (
+                            <span className="flex items-center">
+                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                제출 중...
+                            </span>
+                        ) : (
+                            currentStep === questions.length - 1 ? '제출하기' : '다음'
+                        )}
                     </button>
                 </div>
             </div>
@@ -478,8 +863,7 @@ export default function SurveyPage() {
                 <button
                     onClick={() => {
                         setCurrentStep(0);
-                        setAnswers({});
-                        setOtherInputs({});
+                        setFormErrors({});
                         setShowResult(false);
                     }}
                     className="w-full py-4 rounded-xl bg-gradient-to-r from-blue-400 via-indigo-400 to-violet-400 hover:from-blue-500 hover:via-indigo-500 hover:to-violet-500 transition-all duration-300 text-white font-semibold shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
@@ -493,23 +877,53 @@ export default function SurveyPage() {
     return (
         <main className="min-h-screen bg-gradient-to-b from-white via-blue-50/80 to-indigo-50/80 text-foreground flex items-center justify-center relative overflow-hidden px-4 sm:px-6 lg:px-8 py-12">
             {/* Background container */}
-            <div className="fixed inset-0 w-full h-full pointer-events-none">
-                <div
-                    className="absolute -top-40 -left-40 w-[800px] h-[800px] bg-gradient-to-br from-blue-200 to-indigo-200 rounded-full mix-blend-normal filter blur-[100px] opacity-40"
-                    style={{ transform: `translate(${mousePosition.x * 0.5}px, ${mousePosition.y * 0.5}px)` }}
-                />
-                <div
-                    className="absolute -bottom-40 -right-40 w-[800px] h-[800px] bg-gradient-to-tr from-violet-200 to-purple-200 rounded-full mix-blend-normal filter blur-[100px] opacity-40"
-                    style={{ transform: `translate(${-mousePosition.x * 0.5}px, ${-mousePosition.y * 0.5}px)` }}
+        <div className="fixed inset-0 w-full h-full pointer-events-none">
+            <div
+                className="absolute -top-40 -left-40 w-[800px] h-[800px] bg-gradient-to-br from-blue-200 to-indigo-200 rounded-full mix-blend-normal filter blur-[100px] opacity-40"
+                    style={{ 
+                        transform: `translate3d(${mousePosition.x * 0.5}px, ${mousePosition.y * 0.5}px, 0)`,
+                        willChange: 'transform'
+                    }}
+            />
+            <div
+                className="absolute -bottom-40 -right-40 w-[800px] h-[800px] bg-gradient-to-tr from-violet-200 to-purple-200 rounded-full mix-blend-normal filter blur-[100px] opacity-40"
+                    style={{ 
+                        transform: `translate3d(${-mousePosition.x * 0.5}px, ${-mousePosition.y * 0.5}px, 0)`,
+                        willChange: 'transform'
+                    }}
                 />
             </div>
 
             {/* Content */}
             <div className="relative z-10 w-full max-w-2xl mx-auto">
                 <div className="bg-white/95 backdrop-blur-md rounded-3xl sm:rounded-4xl p-6 sm:p-8 md:p-10 shadow-2xl border border-white/50">
-                    {showResult ? renderResult() : renderQuestion()}
+                    <AnimatePresence mode="wait">
+                        {state === 'welcome' && (
+                            <motion.div
+                                key="welcome"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.2, ease: "easeInOut" }}
+                            >
+                                {renderWelcome()}
+                            </motion.div>
+                        )}
+                        {state === 'survey' && (
+                            <motion.div
+                                key="survey"
+                                initial={{ opacity: 0, x: 10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -10 }}
+                                transition={{ duration: 0.2, ease: "easeInOut" }}
+                                style={{ willChange: 'transform, opacity' }}
+                            >
+                                {showResult ? renderResult() : renderQuestion()}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
-            </div>
-        </main>
+        </div>
+    </main>
     );
 }
