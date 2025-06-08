@@ -1,5 +1,6 @@
 "use client";
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 export default function Home() {
@@ -88,27 +89,21 @@ export default function Home() {
             {/* Start Button */}
             <div className="relative mt-2 sm:mt-4 animate-fade-in-up delay-200">
               <div className="absolute -inset-1 bg-gradient-to-r from-blue-400 to-indigo-400 rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-300" />
+              <Link href="/survey">
               <button 
                 className="group relative px-6 sm:px-8 py-3 sm:py-4 rounded-xl bg-gradient-to-r from-blue-400 via-indigo-400 to-violet-400 hover:from-blue-500 hover:via-indigo-500 hover:to-violet-500 transition-all duration-300 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
                 onMouseEnter={() => setIsButtonHovered(true)}
                 onMouseLeave={() => setIsButtonHovered(false)}
               >
                 <span className="relative text-base sm:text-lg font-semibold text-white flex items-center gap-2">
-                  시작하기
-                  <svg 
-                    className={`w-4 h-4 sm:w-5 sm:h-5 transition-all duration-300`} 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                  </svg>
+                  시작하기 ✨
                 </span>
                 <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
               </button>
               <div className="absolute -bottom-5 left-1/2 transform -translate-x-1/2 text-xs sm:text-sm text-gray-500 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-1 group-hover:translate-y-0">
                 클릭하여 시작하세요 ✨
               </div>
+              </Link>
             </div>
 
             {/* Privacy Notice */}
