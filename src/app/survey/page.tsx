@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useForm, Controller, ControllerRenderProps, FieldError, UseFormReturn, FieldValues } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useRouter } from "next/navigation";
 
 // Zod 스키마 정의
 const surveySchema = z.object({
@@ -301,7 +302,7 @@ export default function SurveyPage() {
     const [formErrors, setFormErrors] = useState<ErrorState>({});
     const [answers, setAnswers] = useState<SurveyAnswer[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
-
+    const router = useRouter();
     // 각 질문별 상태 추가
     const [question1Value, setQuestion1Value] = useState<Question1State>(undefined);
     const [question2Value, setQuestion2Value] = useState<Question2State>({ age: 0, grade: '' });
@@ -354,7 +355,7 @@ export default function SurveyPage() {
     useEffect(() => {
         const fetchNickname = async () => {
             try {
-                const response = await fetch('http://localhost:8000/get-nickname');
+                const response = await fetch('/api/calculate-result');
                 const data = await response.json();
                 setNickname(data.nickname);
             } catch (error) {
@@ -430,7 +431,7 @@ export default function SurveyPage() {
                 }
             };
 
-            const response = await fetch('/api/survey', {
+            const response = await fetch('/api/calculate-result', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -443,9 +444,14 @@ export default function SurveyPage() {
             }
 
             const result = await response.json();
-            setNickname(result.nickname);
-            setState('result');
-            setShowResult(true);
+            
+            // 결과 페이지로 데이터 전달 (분석 결과 포함)
+            router.push(`/survey/result?data=${encodeURIComponent(JSON.stringify({
+                answers: submissionData.formData,
+                metadata: submissionData.metadata,
+                nickname: nickname,
+                analysis: result.data // 백엔드에서 받은 분석 결과 추가
+            }))}`);
         } catch (error) {
             console.error('Error submitting survey:', error);
             alert('설문 제출 중 오류가 발생했습니다. 다시 시도해주세요.');
@@ -715,9 +721,15 @@ export default function SurveyPage() {
                                     {option.isOther && multipleValue.includes(option.value) && (
                                         <input
                                             type="text"
-                                            value=""
+                                            value={multipleValue.find(v => v.startsWith('other:'))?.split(':')[1] || ''}
                                             onChange={(e) => {
-                                                const newValues = [...multipleValue];
+                                                const otherValue = e.target.value;
+                                                const newValues = multipleValue.filter(v => !v.startsWith('other:'));
+                                                if (otherValue) {
+                                                    newValues.push(`other:${otherValue}`);
+                                                } else {
+                                                    newValues.push('other');
+                                                }
                                                 setCurrentValue(newValues as any);
                                                 saveAnswer(question.id, newValues);
                                             }}
