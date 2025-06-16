@@ -803,8 +803,10 @@ function ResultContent() {
                     <div className="bg-white/10 backdrop-blur-sm p-6 rounded-2xl">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-lg font-semibold">용산경찰서 마약팀</p>
-                                <p className="text-2xl font-bold mt-2">02-XXX-XXXX</p>
+                                <p className="text-lg font-semibold">청소년 마약상담</p>
+                                <p className="text-2xl font-bold mt-2">1342</p>
+                                <p className="text-lg font-semibold">용산경찰서 학교전담경찰관</p>  
+                                <p className="text-2xl font-bold mt-2">02-2198-0299</p>
                             </div>
                             <span className="text-4xl">📱</span>
                         </div>
